@@ -1,10 +1,10 @@
-# console-encoding-triage
+# local-dev-env-pitfalls
 
 **本地开发环境的坑位清单**：终端编码 / 沙箱受限环境 / 文件读写与命令行 /
 语言与库 —— 全部按"**源头规避 + 兜底排查**"组织
 （SKILL.md，兼容 DSH / Claude 风格 skills 格式）。
 
-> **名字只反映了最早的第一部分。** 实际覆盖四层，而且四层的**判据是同一条**：
+> 覆盖四层，而且四层的**判据是同一条**：
 > 症状看起来像"业务代码写错了"，实际错在更底下；
 > 识别信号是"**错的地方太基础了、不像我会犯**"。
 > 所以不要按名字以为它只管编码 —— 遇到"环境/工具层面说不通"的问题都先翻这里。
@@ -80,7 +80,7 @@
 
 ```bash
 # 作为 DSH skill 使用
-cp SKILL.md ~/.dsh/skills/console-encoding-triage/SKILL.md
+cp SKILL.md ~/.dsh/skills/local-dev-env-pitfalls/SKILL.md
 ```
 
 或直接作为清单参考。

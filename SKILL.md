@@ -1,13 +1,13 @@
 ---
-name: console-encoding-triage
-description: Windows/Linux 终端中文乱码与沙箱环境坑的系统性规避与排查：从源头把编码钉死（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001），把受限环境的清理坑规避掉（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清），再退到排查法兜底（ascii()、UTF-8 强制、文件重定向、tempfile 本地目录绕开）。
-whenToUse: 写脚本/跑测试前想预先避免中文乱码；或输出/报错里出现乱码（������、锟斤拷、mojibake）、python -c 传中文参数乱码、测试诡异失败疑似编码问题；或异常栈出现在 tempfile/shutil 清理代码或工具会话层（PermissionError [WinError 5]、shell reset）却与业务逻辑无关时。
+name: local-dev-env-pitfalls
+description: 本地开发环境与工具链的**坑位清单**（源头规避 + 兜底排查），覆盖四层 —— ① 终端/文件中文乱码（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001）；② 沙箱与受限环境的清理坑（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清）；③ 文件读写与命令行（编辑器工具的观察策略导致 write/edit 被拒、heredoc 引号、shell 把 > 当重定向导致 git 提交静默失败）；④ 语言与库的陷阱（numpy frombuffer 只读 / view 形状 / **量纲 0~1 还是 0~255**、f-string 引号嵌套、短变量名撞车）以及「外部工具失效先绕开、几十行能自己实现就别修 COM」。
+whenToUse: 写脚本/跑测试前想预先避免环境层的坑；或出现：中文乱码（������、锟斤拷、mojibake）、python -c 或 heredoc 传中文乱码、`SyntaxError: unterminated triple-quoted string`（看着像语法错、其实多半是 heredoc 里中文没配 PYTHONUTF8）、write/edit 报 `file changed since it was read`（工具侧观察过期，**不是权限问题**）、git commit 明明执行了却没提交（信息里的 > 被当重定向）、异常栈落在 tempfile/shutil 清理代码（PermissionError [WinError 5]）或工具会话层（shell reset）却与业务逻辑无关、numpy 数组的形状/量纲不合预期、外部工具（texconv 之类）调不通。**核心识别信号：症状像业务代码错，但错的地方「太基础了、不像我会犯」。**
 user-invocable: true
 ---
 
-# 控制台编码与沙箱环境：从源头规避
+# 本地开发环境的坑位清单：从源头规避
 
-> 核心原则：**先让问题不发生，再兜底排查。** 90% 的"诡异问题"来自显示层或环境层，从源头把它钉死，它根本不会出现。每个部分先讲"从源头规避"，再讲排查兜底。
+> 核心原则：**先让问题不发生，再兜底排查。** 90% 的"诡异问题"来自显示层、环境层或工具层，从源头把它钉死，它根本不会出现。每个部分先讲"从源头规避"，再讲排查兜底。
 
 ## 第一部分：中文乱码 —— 从源头规避
 
