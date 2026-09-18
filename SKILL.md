@@ -1,7 +1,7 @@
 ---
 name: local-dev-env-pitfalls
-description: 本地开发环境与工具链的**坑位清单**（源头规避 + 兜底排查），覆盖四层 —— ① 终端/文件中文乱码（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001）；② 沙箱与受限环境的清理坑（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清）；③ 文件读写与命令行（编辑器工具的观察策略导致 write/edit 被拒、heredoc 引号、shell 把 > 当重定向导致 git 提交静默失败）；④ 语言与库的陷阱（numpy frombuffer 只读 / view 形状 / **量纲 0~1 还是 0~255**、f-string 引号嵌套、短变量名撞车）以及「外部工具失效先绕开、几十行能自己实现就别修 COM」。
-whenToUse: 写脚本/跑测试前想预先避免环境层的坑；或出现：中文乱码（������、锟斤拷、mojibake）、python -c 或 heredoc 传中文乱码、`SyntaxError: unterminated triple-quoted string`（看着像语法错、其实多半是 heredoc 里中文没配 PYTHONUTF8）、write/edit 报 `file changed since it was read`（工具侧观察过期，**不是权限问题**）、git commit 明明执行了却没提交（信息里的 > 被当重定向）、异常栈落在 tempfile/shutil 清理代码（PermissionError [WinError 5]）或工具会话层（shell reset）却与业务逻辑无关、numpy 数组的形状/量纲不合预期、外部工具（texconv 之类）调不通。**核心识别信号：症状像业务代码错，但错的地方「太基础了、不像我会犯」。**
+description: '本地开发环境与工具链的**坑位清单**（源头规避 + 兜底排查），覆盖四层 —— ① 终端/文件中文乱码（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001）；② 沙箱与受限环境的清理坑（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清）；③ 文件读写与命令行（编辑器工具的观察策略导致 write/edit 被拒、heredoc 引号、shell 把 ＞ 当重定向导致 git 提交静默失败）；④ 语言与库的陷阱（numpy frombuffer 只读 / view 形状 / **量纲 0~1 还是 0~255**、f-string 引号嵌套、短变量名撞车）以及「外部工具失效先绕开、几十行能自己实现就别修 COM」。'
+whenToUse: '写脚本/跑测试前想预先避免环境层的坑；或出现：中文乱码（������、锟斤拷、mojibake）、python -c 或 heredoc 传中文乱码、`SyntaxError: unterminated triple-quoted string`（看着像语法错、其实多半是 heredoc 里中文没配 PYTHONUTF8）、write/edit 报 `file changed since it was read`（工具侧观察过期，**不是权限问题**）、git commit 明明执行了却没提交（信息里的 ＞ 被当重定向）、异常栈落在 tempfile/shutil 清理代码（PermissionError [WinError 5]）或工具会话层（shell reset）却与业务逻辑无关、numpy 数组的形状/量纲不合预期、外部工具（texconv 之类）调不通。**核心识别信号：症状像业务代码错，但错的地方「太基础了、不像我会犯」。**'
 user-invocable: true
 ---
 
@@ -239,6 +239,14 @@ f"...{'x'}..."     # ✓ 或者内层改用「」这类全角引号（中文文�
 * **Windows 仓库加 `.gitattributes`**：`* text=auto eol=lf` + 二进制后缀白名单，
   免得每次 commit 刷一屏 `LF will be replaced by CRLF`，
   也避免换机器时整仓库被判定成"全部修改"。
+* **YAML frontmatter（写 skill / 配置头）里的英文 `冒号+空格` 会破坏结构**：
+  未加引号的值里出现 `: ` 会被当成"新的键值对" ⇒ `ScannerError: mapping values
+  are not allowed here`，**整个 skill 直接加载不了**（而且报错只给列号，不给行内容，
+  很容易看漏）。实测踩在 `` `SyntaxError: unterminated ...` `` 这种"引用了某个报错文本"
+  的句子里。⇒ **长文本值一律用单引号包起来**（内部的 `'` 写成 `''`），
+  写完**用 `yaml.safe_load` 验一遍**，别靠肉眼。
+* **改 skill 的名字，光改 frontmatter 不够** —— 扫描是按**目录名**走的。
+  两处都要改，否则表现为"旧名字消失了、新名字也没出现"。
 
 ---
 
