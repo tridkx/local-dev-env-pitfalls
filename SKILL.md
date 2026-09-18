@@ -130,6 +130,54 @@ finally:
 - ❌ `tempfile.TemporaryDirectory` 在受限环境反复重试（每次都在清理时失败）——应改用 `ignore_cleanup_errors=True` 或本地目录。
 - ❌ 把 `rmtree` 的权限错误当成数据损坏去排查。
 
+## 第三部分：文件读写与命令行的坑（工具会话层）
+
+### 0. 先懂一件事：编辑器工具会"记着你上次读到的版本"
+
+带观察策略的文件工具（`write` / `edit` 之类）会记录"这个文件上次被读到时是什么样"。
+如果你**绕过工具**改了它（`sed -i`、`python -c "open(...).write()"`、`cat > f`），
+工具侧的记录就过期了，下一次 `write`/`edit` 会被**直接拒绝**：
+
+```
+file changed since it was read — re-read the file, then retry
+file no longer exists — re-read the file, then retry     # 把文件删掉后也一样
+```
+
+**这不是权限问题，重试没有用** —— 它要的是"重新建立观察"。
+
+### 1. 源头规避
+
+**A. 一个文件只走一条路。** 要么全程用编辑器工具，要么全程用 shell
+（`cat > f <<'EOF'`、`python - <<'PYEOF'`）。混用时每次切换都要"重新读一次"。
+
+**B. 批量 / 程序化修改优先走 shell**（一次成型，不用来回同步状态）。
+
+**C. 非要在工具与 shell 之间切换**：先 `read` 一次（哪怕只看 1 行），
+把工具侧的观察刷新回来，再动手。
+
+### 2. shell 的引号与重定向（踩过才知道）
+
+* **heredoc 一定要带引号**：`<<'EOF'` 里 `$变量`、反引号、反斜杠**都不展开**；
+  `<<EOF`（不带引号）会展开 —— 脚本里一出现 `$` 就翻车。
+* **命令里出现 `>`、`|`、`&`、`()` 时，先想"会不会被 shell 吃掉"**。
+  实测：`git commit -m "... >50% 判据 ..."` 里的 `>50%判据` 被当成**重定向**，
+  报 `No such file or directory`、提交**静默失败**（exit code 1 但看不出原因）。
+  ⇒ **多行或含特殊字符的提交信息一律用 `git commit -F - <<'MSG'`**。
+* **`python -c "..."` 里嵌引号**：外层双引号时内层写转义引号；再复杂就直接落成 heredoc 脚本。
+* **长命令加超时或丢后台**：`timeout 300 python ...`，否则一挂就卡住整个回合。
+
+### 3. 反模式
+
+- ❌ 同一个 `write` 反复重试（记录过期，重试一百次也一样）。
+- ❌ 用不带引号的 heredoc 写含 `$` / 反引号的脚本。
+- ❌ 把"提交信息里的 `>`"当成 git 的 bug 去查。
+- ❌ **`python - <<'PYEOF'` 里塞了非 ASCII 却没设 `PYTHONUTF8=1`** ——
+  Python 会按系统 ANSI（简中 GBK）解码 stdin，中文变乱码、三引号都可能配不上对，
+  报出来的却是 `SyntaxError: unterminated triple-quoted string literal`（**看起来像语法错，
+  其实是编码错**）。⇒ 凡 heredoc 里有中文，**一律带 `PYTHONUTF8=1 PYTHONIOENCODING=utf-8`**。
+
+---
+
 ## 结尾检查清单（先做源头规避，一次到位，再谈兜底）
 
 - [ ] UTF-8 单编码铁律已落地？——文件读写显式 `encoding="utf-8"`、脚本/标准流已钉死 UTF-8、终端已 `chcp 65001`？
@@ -137,3 +185,7 @@ finally:
 - [ ] 若乱码/异常仍出现：输出看过 `ascii()` 版本了吗？`PYTHONUTF8=1 / -X utf8 / chcp 65001` 试过了吗？
 - [ ] 断言对象是 list 还是 str？（list 的 `in` 是元素等值！——逻辑层陷阱，确认后回业务代码）
 - [ ] traceback 最后一帧在业务代码还是框架/环境代码？
+- [ ] heredoc 里有中文却忘了 `PYTHONUTF8=1`？（`SyntaxError: unterminated triple-quoted string`
+      很可能其实是编码错）
+- [ ] 文件是"编辑器工具"还是"shell"改的？有没有混用导致工具侧观察过期（write/edit 被拒）？
+- [ ] heredoc 带引号了吗（`<<'EOF'`）？提交信息用的是 `-F -` 而不是 `-m "...>`？
