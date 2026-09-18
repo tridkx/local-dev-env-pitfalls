@@ -178,6 +178,70 @@ file no longer exists — re-read the file, then retry     # 把文件删掉后�
 
 ---
 
+## 第四部分：语言、库与工具的陷阱
+
+> 这一部分的共同点：**症状看起来像"业务代码写错了"，实际错在更底下**。
+> 识别信号：**"错的地方太基础了、不像我会犯"** —— 那多半就是这一类，先往这层查。
+
+### 1. Python / numpy
+
+**A. `np.frombuffer` 返回的是只读视图**（改它直接报错）：
+```python
+arr = np.frombuffer(buf, np.uint8, count=n, offset=off)   # 只读
+arr[0] = 1                                                # ValueError: read-only
+arr = arr.reshape(-1, k).copy()                           # 先 copy 再改
+```
+
+**B. `.view()` 只作用在最后一维，形状常常不是你要的**：
+```python
+blk = np.frombuffer(data, np.uint8).reshape(-1, 8)      # (n, 8)
+c = blk[:, :2].copy().view("<u2")                       # ✗ (n, 1)，不是 (n, 2)
+c = np.frombuffer(np.ascontiguousarray(blk[:, :2]).tobytes(),
+                  "<u2").reshape(-1, 2)                 # ✓
+```
+判据：`view` / `reshape` 之后**先 print shape**，别假设。
+
+**C. f-string 里不能嵌套同种引号（Python < 3.12）**：
+```python
+f"...{"x"}..."     # ✗ SyntaxError: f-string: expecting '}'
+f"...{'x'}..."     # ✓ 或者内层改用「」这类全角引号（中文文案里更自然）
+```
+
+**D. 短变量名在长脚本里会撞车**：实测一个脚本里 `d` 既是 `measure_drift()`
+返回的字典、又被复用成"距离"，几十行之后组装文件时炸掉
+（`only integers ... are valid indices`）。⇒ 距离用 `dist`、字典用 `drift`，
+**别用 1~2 个字母的名字**。
+
+**E. 语义陷阱：函数返回的"归一化值"**。同名函数可能返回不同量纲 ——
+实测某个 `vertices_view()` 返回的权重是 **0~1 的 float**（内部已除过 255），
+而同一份代码的另一处按 **0~255 的整数**用；结果后者被下游 `floor` 全部抹成 0，
+表现为"权重全丢"却没有任何报错。⇒ **拿到的数组先断言量纲**
+（`arr.max()` 应该是 1.0 还是 255？）。
+
+### 2. 外部工具失效：**先绕开，别死磕**
+
+实测两个：
+* 插件自带的 `texconv.dll` 用 ctypes 调用报 `80004002 不支持此接口`
+  ⇒ 直接改成**自己写纯 Python 解码器**（BC1 很简单），几分钟的事，
+  比继续修 COM 调用划算得多。
+* `PIL` 能打开 BC7 的 DDS，但 **alpha 通道解出来是常量**（不是真值）
+  ⇒ 别以为"能打开"就等于"解对了"；**结论要交叉验证**
+  （换一条通道、换一个已知文件做对照）。
+
+**判据**：一个外部工具调不通，**先问"这个功能我自己实现要多久"**；
+几十行能搞定的（BC1 解码、简单格式解析），直接自己写。
+
+### 3. 杂项
+
+* **`import` 别的脚本会执行它的模块级代码** —— 想复用其中一个函数时，
+  先确认那个脚本"只有函数"，否则把函数抽出来单独放。
+* **长命令设超时 / 丢后台**：`timeout 300 python ...`，否则一挂就卡住整个回合。
+* **Windows 仓库加 `.gitattributes`**：`* text=auto eol=lf` + 二进制后缀白名单，
+  免得每次 commit 刷一屏 `LF will be replaced by CRLF`，
+  也避免换机器时整仓库被判定成"全部修改"。
+
+---
+
 ## 结尾检查清单（先做源头规避，一次到位，再谈兜底）
 
 - [ ] UTF-8 单编码铁律已落地？——文件读写显式 `encoding="utf-8"`、脚本/标准流已钉死 UTF-8、终端已 `chcp 65001`？
@@ -189,3 +253,6 @@ file no longer exists — re-read the file, then retry     # 把文件删掉后�
       很可能其实是编码错）
 - [ ] 文件是"编辑器工具"还是"shell"改的？有没有混用导致工具侧观察过期（write/edit 被拒）？
 - [ ] heredoc 带引号了吗（`<<'EOF'`）？提交信息用的是 `-F -` 而不是 `-m "...>`？
+- [ ] 拿到 numpy 数组先断言了**量纲**（0~1 还是 0~255）和 **shape** 吗？
+- [ ] 外部工具调不通时，先试过"自己实现要多久"吗（几十行就别修 COM 了）？
+- [ ] "能打开"≠"解对了"：关键的数值结论有没有用第二条路交叉验证？
