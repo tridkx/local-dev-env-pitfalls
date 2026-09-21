@@ -22,6 +22,10 @@
 - 进程/会话级 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`、`python -X utf8`、终端 `chcp 65001`
 - 源文件第一行 `# -*- coding: utf-8 -*-`
 - git-bash 写中文用 `printf '%s\n' '中文' > out.txt`，别用 `cat`/`echo` 拼
+- **PowerShell 脚本（`.ps1`）存 UTF-8 with BOM**：无 BOM 时 Windows PowerShell 5.1
+  按 ANSI（简中 GBK）解码，中文注释的字节被解成引号/括号 —— 轻则报 `Unexpected token )`，
+  重则**参数被静默改写**（实测：带正则 `--filter` 的解包脚本"filter 失效"、解出满盘几万无关文件）。
+  注意编辑器工具（`write`/`edit`）保存会**抹掉 BOM**，改完要补一次并用 `Parser::ParseFile` 自检
 
 **排查兜底**
 
@@ -29,6 +33,7 @@
 - 重定向到文件再读、磁盘字节对比（`bytes.find`）
 - 三层模型：显示层 / 传输层 / 逻辑层
 - 常见坑：list 的 `in` 是元素等值而非子串匹配、`python -c` 传中文的平台差异
+- "我在终端手跑没事、写成 `.ps1` 一跑就炸" ⇒ 先查 BOM（`pwsh` 7 默认 UTF-8，所以手跑正常）
 
 ## 第二部分：沙箱 / 受限环境
 
