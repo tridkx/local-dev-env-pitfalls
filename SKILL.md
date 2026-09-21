@@ -1,7 +1,7 @@
 ---
 name: local-dev-env-pitfalls
-description: '本地开发环境与工具链的**坑位清单**（源头规避 + 兜底排查），覆盖四层 —— ① 终端/文件中文乱码（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001）；② 沙箱与受限环境的清理坑（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清）；③ 文件读写与命令行（编辑器工具的观察策略导致 write/edit 被拒、heredoc 引号、shell 把 ＞ 当重定向导致 git 提交静默失败）；④ 语言与库的陷阱（numpy frombuffer 只读 / view 形状 / **量纲 0~1 还是 0~255**、f-string 引号嵌套、短变量名撞车）以及「外部工具失效先绕开、几十行能自己实现就别修 COM」。'
-whenToUse: '写脚本/跑测试前想预先避免环境层的坑；或出现：中文乱码（������、锟斤拷、mojibake）、python -c 或 heredoc 传中文乱码、`SyntaxError: unterminated triple-quoted string`（看着像语法错、其实多半是 heredoc 里中文没配 PYTHONUTF8）、write/edit 报 `file changed since it was read`（工具侧观察过期，**不是权限问题**）、git commit 明明执行了却没提交（信息里的 ＞ 被当重定向）、异常栈落在 tempfile/shutil 清理代码（PermissionError [WinError 5]）或工具会话层（shell reset）却与业务逻辑无关、numpy 数组的形状/量纲不合预期、外部工具（texconv 之类）调不通。**核心识别信号：症状像业务代码错，但错的地方「太基础了、不像我会犯」。**'
+description: '本地开发环境与工具链的**坑位清单**（源头规避 + 兜底排查），覆盖四层 —— ① 终端/文件中文乱码（UTF-8 单编码铁律：显式 encoding、PYTHONUTF8/reconfigure、chcp 65001；**PowerShell .ps1 必须带 BOM，否则中文注释会让脚本语法崩坏或参数静默失效**）；② 沙箱与受限环境的清理坑（TemporaryDirectory(ignore_cleanup_errors=True)、本地目录手动清）；③ 文件读写与命令行（编辑器工具的观察策略导致 write/edit 被拒、heredoc 引号、shell 把 ＞ 当重定向导致 git 提交静默失败）；④ 语言与库的陷阱（numpy frombuffer 只读 / view 形状 / **量纲 0~1 还是 0~255**、f-string 引号嵌套、短变量名撞车）以及「外部工具失效先绕开、几十行能自己实现就别修 COM」。'
+whenToUse: '写脚本/跑测试前想预先避免环境层的坑；或出现：中文乱码（������、锟斤拷、mojibake）、PowerShell 脚本报 Unexpected token 之类的语法错、脚本参数莫名失效/正则 filter 不生效（.ps1 无 BOM 被按 GBK 解码）、python -c 或 heredoc 传中文乱码、`SyntaxError: unterminated triple-quoted string`（看着像语法错、其实多半是 heredoc 里中文没配 PYTHONUTF8）、write/edit 报 `file changed since it was read`（工具侧观察过期，**不是权限问题**）、git commit 明明执行了却没提交（信息里的 ＞ 被当重定向）、异常栈落在 tempfile/shutil 清理代码（PermissionError [WinError 5]）或工具会话层（shell reset）却与业务逻辑无关、numpy 数组的形状/量纲不合预期、外部工具（texconv 之类）调不通。**核心识别信号：症状像业务代码错，但错的地方「太基础了、不像我会犯」。**'
 user-invocable: true
 ---
 
@@ -55,7 +55,26 @@ with open(path, "r", encoding="utf-8") as f: ...   # 读取
 
 **E. git-bash 写含中文的行**：`printf '%s\n' '中文' > out.txt`（默认按 UTF-8 写字节）；别用 `cat`/`echo` 拼接——码页不同结果不同。
 
-**✔ 应用 A–E 之后，乱码基本不会出现。** 万一仍出现 → 走"2. 排查（兜底）"。
+**F. Windows PowerShell 脚本（`.ps1`）必须存成 UTF-8 **with BOM**：**
+
+`powershell.exe`（Windows PowerShell 5.1）读 `.ps1` 时**没有 BOM 就按系统 ANSI（简中 cp936/GBK）解码**。UTF-8 无 BOM 的中文注释被解成乱码字节，其中 `「」（）` 这类全角字符的字节序列恰好能解出 `"` `'` `)` —— 于是：
+* **显性**：报 `Unexpected token ')' in expression or statement`，看起来像自己括号写错了；
+* **隐性（更坑）**：语法侥幸过关，但**参数被静默改写** —— 实测一个带正则 `--filter` 的解包脚本，"filter 失效"、解出满盘几万个无关文件，排查半天以为工具坏了，真凶只是注释里的中文。
+
+```powershell
+# 给已有 .ps1 补 BOM（无 BOM 读入 → 带 BOM 写出）
+$p = 'x.ps1'
+$c = [System.IO.File]::ReadAllText($p, [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText($p, $c, [System.Text.UTF8Encoding]::new($true))
+# 自检：解析器能过就是好文件
+$err = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$err); $err.Count
+```
+
+* **二次陷阱**：带观察策略的编辑器工具（`write` / `edit`）保存时会**把 BOM 去掉** —— 每次用工具改完 `.ps1` 都要重新补一次再自检。最省事的替代是把脚本里的注释/字符串全写成 ASCII。
+* `pwsh`（PowerShell 7+）默认按 UTF-8 读，**没有**这个问题 —— 所以"我在终端里手跑没问题、写成脚本一跑就炸"本身就是这条坑的信号。
+* 同理适用于其它"按 ANSI 猜编码"的 Windows 宿主（`.bat`/`.cmd` 的 `chcp`、部分旧版工具）。
+
+**✔ 应用 A–F 之后，乱码基本不会出现。** 万一仍出现 → 走"2. 排查（兜底）"。
 
 ### 2. 排查（兜底）：三步定位，别用眼睛读乱码
 
@@ -253,6 +272,7 @@ f"...{'x'}..."     # ✓ 或者内层改用「」这类全角引号（中文文�
 ## 结尾检查清单（先做源头规避，一次到位，再谈兜底）
 
 - [ ] UTF-8 单编码铁律已落地？——文件读写显式 `encoding="utf-8"`、脚本/标准流已钉死 UTF-8、终端已 `chcp 65001`？
+- [ ] 写/改过 `.ps1` 吗？——**BOM 还在吗**（编辑器工具保存会把它抹掉）、`Parser::ParseFile` 自检过了吗？（无 BOM 的脚本在 Windows PowerShell 5.1 下会语法崩坏或参数静默失效）
 - [ ] 受限环境下临时目录用了 `ignore_cleanup_errors=True` 或本地目录 + `ignore_errors=True`？（清理阶段不再冒 PermissionError）
 - [ ] 若乱码/异常仍出现：输出看过 `ascii()` 版本了吗？`PYTHONUTF8=1 / -X utf8 / chcp 65001` 试过了吗？
 - [ ] 断言对象是 list 还是 str？（list 的 `in` 是元素等值！——逻辑层陷阱，确认后回业务代码）
