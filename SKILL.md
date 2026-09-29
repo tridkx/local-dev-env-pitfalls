@@ -266,6 +266,15 @@ f"...{'x'}..."     # ✓ 或者内层改用「」这类全角引号（中文文�
   写完**用 `yaml.safe_load` 验一遍**，别靠肉眼。
 * **改 skill 的名字，光改 frontmatter 不够** —— 扫描是按**目录名**走的。
   两处都要改，否则表现为"旧名字消失了、新名字也没出现"。
+* ★ **别把临时脚本写进 `%TEMP%` 再从那里运行** —— 系统临时目录里往往堆着历次
+  会话留下的脚本，其中一个只要**撞上标准库的模块名**，就会遮蔽真正的标准库：
+  实测 `%TEMP%\inspect.py`（内容是一段 Blender 脚本）让 `python %TEMP%\x.py`
+  直接崩在 `ModuleNotFoundError: No module named 'bpy'` —— 报错指向一个跟本任务
+  毫不相干的模块，追下去才发现是 `pyglet/event.py` 里 `import inspect` 命中了那个
+  假文件（脚本所在目录是 `sys.path[0]`，优先于标准库）。
+  ⇒ 临时脚本放**项目目录**下的临时子目录（如 `<proj>/_probe/`）；
+  用 `python - <<'EOF'` 走 stdin 时 `sys.path[0]` 是 cwd，不会踩这个坑。
+  同类还有 `%TEMP%\random.py` / `types.py` / `json.py`。
 
 ---
 
